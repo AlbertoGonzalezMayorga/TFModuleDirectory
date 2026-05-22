@@ -2,6 +2,15 @@
 
 Modulo reutilizable para crear clusters de Amazon EKS con Auto Mode o managed node groups clasicos. Puede crear roles IAM, crear subnets simples si se solicita, instalar add-ons administrados y configurar access entries.
 
+## Que Crea
+
+- `aws_eks_cluster`
+- `aws_eks_node_group`, cuando `cluster_mode = "classic"`
+- `aws_eks_addon`, si se declaran add-ons
+- `aws_eks_access_entry` y `aws_eks_access_policy_association`, si se declaran access entries
+- roles IAM de cluster y nodos, si `create_*_iam_role = true`
+- subnets simples, si `create_subnets = true`
+
 ## Ejemplo minimo con subnets existentes
 
 ```hcl
@@ -149,3 +158,19 @@ module "eks" {
 - `subnet_ids`
 - `managed_node_groups`
 - `cluster_addons`
+
+## Inputs principales
+
+- `cluster_name`: nombre del cluster.
+- `cluster_mode`: `auto` o `classic`.
+- `subnet_ids`: subnets existentes recomendadas.
+- `create_subnets`, `vpc_id`, `vpc_cidr`: creacion simple de subnets desde el modulo.
+- `kubernetes_version`: version concreta, o `null` para default de AWS.
+- `authentication_mode`: `API`, `CONFIG_MAP` o `API_AND_CONFIG_MAP`.
+- `managed_node_groups`: node groups configurables para modo classic.
+- `cluster_addons`: add-ons administrados por EKS.
+- `access_entries`: acceso IAM moderno al cluster.
+
+## Notas
+
+Para produccion, normalmente conviene pasar `subnet_ids` desde un modulo VPC dedicado. La creacion de subnets incluida es intencionadamente simple.
