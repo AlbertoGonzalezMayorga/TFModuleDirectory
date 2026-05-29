@@ -2,6 +2,9 @@ locals {
   cluster_role_arn = var.create_cluster_iam_role ? aws_iam_role.cluster[0].arn : var.cluster_iam_role_arn
   node_role_arn    = var.create_node_iam_role ? aws_iam_role.node[0].arn : var.node_iam_role_arn
 
+  oidc_issuer_url   = aws_eks_cluster.this.identity[0].oidc[0].issuer
+  oidc_provider_arn = var.create_oidc_provider ? aws_iam_openid_connect_provider.this[0].arn : var.oidc_provider_arn
+
   parent_prefix           = var.create_subnets ? tonumber(split("/", var.vpc_cidr)[1]) : 0
   subnet_newbits          = var.create_subnets ? ceil(log(var.subnet_count, 2)) : 0
   generated_subnet_prefix = local.parent_prefix + local.subnet_newbits
@@ -45,23 +48,36 @@ locals {
     }
   } : {}
 
+  cluster_base_policy_arns = [
+    "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+  ]
+
+  cluster_auto_policy_arns = [
+    "arn:aws:iam::aws:policy/AmazonEKSComputePolicy",
+    "arn:aws:iam::aws:policy/AmazonEKSBlockStoragePolicy",
+    "arn:aws:iam::aws:policy/AmazonEKSLoadBalancingPolicy",
+    "arn:aws:iam::aws:policy/AmazonEKSNetworkingPolicy",
+  ]
+
+  node_auto_policy_arns = [
+    "arn:aws:iam::aws:policy/AmazonEKSWorkerNodeMinimalPolicy",
+    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly",
+  ]
+
+  node_classic_policy_arns = [
+    "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+    "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly",
+  ]
+
   cluster_policy_arns = toset(concat(
-    ["arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"],
-    var.cluster_mode == "auto" ? [
-      "arn:aws:iam::aws:policy/AmazonEKSComputePolicy",
-      "arn:aws:iam::aws:policy/AmazonEKSBlockStoragePolicy",
-      "arn:aws:iam::aws:policy/AmazonEKSLoadBalancingPolicy",
-      "arn:aws:iam::aws:policy/AmazonEKSNetworkingPolicy",
-    ] : [],
+    local.cluster_base_policy_arns,
+    var.cluster_mode == "auto" ? local.cluster_auto_policy_arns : [],
     var.cluster_additional_policy_arns
   ))
 
   node_policy_arns = toset(concat(
-    [
-      "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
-      "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
-      "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly",
-    ],
+    var.cluster_mode == "auto" ? local.node_auto_policy_arns : local.node_classic_policy_arns,
     var.node_additional_policy_arns
   ))
 

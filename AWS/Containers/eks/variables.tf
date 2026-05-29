@@ -257,6 +257,18 @@ variable "cluster_additional_policy_arns" {
   default     = []
 }
 
+variable "create_oidc_provider" {
+  description = "Whether to create an IAM OpenID Connect provider for this cluster."
+  type        = bool
+  default     = true
+}
+
+variable "oidc_provider_arn" {
+  description = "Existing IAM OpenID Connect provider ARN. Required when create_oidc_provider is false and IRSA consumers need it."
+  type        = string
+  default     = null
+}
+
 variable "create_node_iam_role" {
   description = "Whether to create the EKS node IAM role."
   type        = bool
@@ -353,7 +365,6 @@ variable "max_node_count" {
 
 variable "node_group_defaults" {
   description = "Defaults used by managed node groups."
-
   type = object({
     ami_type                   = optional(string, "AL2023_x86_64_STANDARD")
     capacity_type              = optional(string, "ON_DEMAND")
@@ -400,40 +411,6 @@ variable "managed_node_groups" {
   }))
 
   default = {}
-}
-
-
-### EKS Add-ons
-
-variable "cluster_addons" {
-  description = "EKS managed add-ons to install in the cluster, keyed by add-on name."
-
-  type = map(object({
-    addon_version               = optional(string)
-    configuration_values        = optional(string)
-    preserve                    = optional(bool, true)
-    resolve_conflicts_on_create = optional(string, "OVERWRITE")
-    resolve_conflicts_on_update = optional(string, "OVERWRITE")
-    service_account_role_arn    = optional(string)
-    tags                        = optional(map(string), {})
-
-    pod_identity_associations = optional(list(object({
-      role_arn        = string
-      service_account = string
-    })), [])
-  }))
-
-  default = {}
-
-  validation {
-    condition = alltrue(flatten([
-      for addon in values(var.cluster_addons) : [
-        contains(["NONE", "OVERWRITE"], addon.resolve_conflicts_on_create),
-        contains(["NONE", "OVERWRITE", "PRESERVE"], addon.resolve_conflicts_on_update)
-      ]
-    ]))
-    error_message = "resolve_conflicts_on_create must be NONE or OVERWRITE. resolve_conflicts_on_update must be NONE, OVERWRITE, or PRESERVE."
-  }
 }
 
 

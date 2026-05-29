@@ -1,63 +1,119 @@
 # AWS VPC Terraform Module
 
-Modulo para crear una VPC nueva o referenciar una existente y, opcionalmente, configurar VPC Flow Logs hacia CloudWatch Logs o S3.
+Modulo reutilizable para componer redes AWS de forma plug and play. Puede crear una VPC nueva o trabajar sobre una existente, y genera subnets publicas, privadas e aisladas con las rutas necesarias.
 
 ## Que Crea
 
 - `aws_vpc`, si `create_vpc = true`
-- `aws_flow_log`, si `create_flow_log = true`
-- `aws_cloudwatch_log_group`, si el destino es CloudWatch Logs
+- `aws_subnet.public`
+- `aws_subnet.private`
+- `aws_subnet.isolated`
+- `aws_internet_gateway`, si hay subnets publicas
+- `aws_nat_gateway`, si `enable_nat_gateway = true`
+- route tables y asociaciones por tipo de subnet
+- VPC Flow Logs opcionales
 
-## Ejemplo VPC Nueva
+## Red EKS-ready
 
 ```hcl
 module "vpc" {
-  source = "./modules/AWS/Networking/vpc"
+  source = "./modules/vpc"
 
-  create_vpc = true
-  vpc_cidr   = "10.0.0.0/16"
+  name     = "platform-dev"
+  vpc_cidr = "10.0.0.0/16"
 
-  create_flow_log      = true
-  log_destination_type = "cloud-watch-logs"
+  public_subnet_count  = 3
+  private_subnet_count = 3
 
-  region = "eu-west-1"
-  tags = {
-    Environment = "dev"
+  enable_nat_gateway = true
+  single_nat_gateway = true
+
+  public_subnet_tags = {
+    "kubernetes.io/cluster/platform-dev" = "shared"
+    "kubernetes.io/role/elb"             = "1"
+  }
+
+  private_subnet_tags = {
+    "kubernetes.io/cluster/platform-dev" = "shared"
+    "kubernetes.io/role/internal-elb"    = "1"
   }
 }
-```
 
-## Ejemplo VPC Existente
+module "eks" {
+  source = "./modules/eks"
 
-```hcl
-module "vpc" {
-  source = "./modules/AWS/Networking/vpc"
-
-  create_vpc = false
-  vpc_id     = "vpc-0123456789abcdef0"
-  vpc_cidr   = "10.0.0.0/16"
-  region     = "eu-west-1"
+  cluster_name = "platform-dev"
+  subnet_ids   = module.vpc.private_subnet_ids
 }
 ```
 
-## Flow Logs A S3
+## Alta disponibilidad de NAT
 
 ```hcl
-create_flow_log      = true
-log_destination_type = "s3"
-logs_bucket_arn      = "arn:aws:s3:::platform-dev-vpc-flow-logs"
+module "vpc" {
+  source = "./modules/vpc"
+
+  name                 = "platform-prod"
+  vpc_cidr             = "10.20.0.0/16"
+  public_subnet_count  = 3
+  private_subnet_count = 3
+
+  enable_nat_gateway = true
+  single_nat_gateway = false
+}
 ```
 
-## Inputs Principales
+## Subnets con CIDRs explicitos
 
-- `create_vpc`: crea VPC o usa una existente.
-- `vpc_id`: requerido cuando `create_vpc = false`.
-- `vpc_cidr`: CIDR de la VPC.
-- `create_flow_log`: activa VPC Flow Logs.
-- `log_destination_type`: `cloud-watch-logs` o `s3`.
-- `logs_bucket_arn`: requerido para destino S3.
-- `traffic_type`: `ACCEPT`, `REJECT` o `ALL`.
+```hcl
+module "vpc" {
+  source = "./modules/vpc"
 
-## Outputs
+  name     = "custom-network"
+  vpc_cidr = "10.30.0.0/16"
 
-Consulta `outputs.tf` para los IDs/ARNs expuestos por el modulo.
+  public_subnet_cidrs = [
+    "10.30.0.0/24",
+    "10.30.1.0/24",
+  ]
+
+  private_subnet_cidrs = [
+    "10.30.10.0/24",
+    "10.30.11.0/24",
+  ]
+
+  isolated_subnet_cidrs = [
+    "10.30.20.0/24",
+    "10.30.21.0/24",
+  ]
+}
+```
+
+## Solo red aislada
+
+```hcl
+module "vpc" {
+  source = "./modules/vpc"
+
+  name                  = "isolated"
+  vpc_cidr              = "10.40.0.0/16"
+  public_subnet_count   = 0
+  private_subnet_count  = 0
+  isolated_subnet_count = 3
+}
+```
+
+## Outputs principales
+
+- `vpc_id`, `vpc_cidr_block`
+- `availability_zones`
+- `public_subnet_ids`, `private_subnet_ids`, `isolated_subnet_ids`
+- `public_route_table_ids`, `private_route_table_ids`, `isolated_route_table_ids`
+- `internet_gateway_id`
+- `nat_gateway_ids`, `nat_gateway_public_ips`
+
+## Notas
+
+- Para EKS, normalmente usa `private_subnet_ids` para los node groups y deja las publicas para load balancers/NAT.
+- Los tags de discovery para EKS/Kubernetes se pasan con `public_subnet_tags` y `private_subnet_tags`; el modulo VPC no tiene conocimiento especifico de EKS.
+- `single_nat_gateway = true` reduce coste; `false` mejora tolerancia a fallo por AZ.

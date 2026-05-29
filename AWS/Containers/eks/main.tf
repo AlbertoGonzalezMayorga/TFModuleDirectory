@@ -1,5 +1,6 @@
 data "aws_availability_zones" "available" {
-  state = "available"
+  state         = "available"
+  exclude_names = ["us-east-1e"] # EKS does not support creating control plane instances in us-east-1e
 }
 
 resource "aws_subnet" "this" {
@@ -174,6 +175,15 @@ resource "aws_eks_cluster" "this" {
   ]
 }
 
+resource "aws_iam_openid_connect_provider" "this" {
+  count = var.create_oidc_provider ? 1 : 0
+
+  client_id_list = ["sts.amazonaws.com"]
+  url            = local.oidc_issuer_url
+
+  tags = var.tags
+}
+
 resource "aws_eks_node_group" "this" {
   for_each = local.managed_node_groups
 
@@ -246,33 +256,6 @@ resource "aws_eks_node_group" "this" {
   lifecycle {
     ignore_changes = [scaling_config[0].desired_size]
   }
-}
-
-resource "aws_eks_addon" "this" {
-  for_each = var.cluster_addons
-
-  addon_name                  = each.key
-  addon_version               = each.value.addon_version
-  cluster_name                = aws_eks_cluster.this.name
-  configuration_values        = each.value.configuration_values
-  preserve                    = each.value.preserve
-  resolve_conflicts_on_create = each.value.resolve_conflicts_on_create
-  resolve_conflicts_on_update = each.value.resolve_conflicts_on_update
-  service_account_role_arn    = each.value.service_account_role_arn
-  tags                        = merge(var.tags, each.value.tags)
-
-  dynamic "pod_identity_association" {
-    for_each = each.value.pod_identity_associations
-
-    content {
-      role_arn        = pod_identity_association.value.role_arn
-      service_account = pod_identity_association.value.service_account
-    }
-  }
-
-  depends_on = [
-    aws_eks_node_group.this,
-  ]
 }
 
 resource "aws_eks_access_entry" "this" {

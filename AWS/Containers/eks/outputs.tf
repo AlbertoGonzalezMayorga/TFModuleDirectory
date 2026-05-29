@@ -24,6 +24,11 @@ output "cluster_oidc_issuer_url" {
   value       = aws_eks_cluster.this.identity[0].oidc[0].issuer
 }
 
+output "oidc_provider_arn" {
+  description = "IAM OpenID Connect provider ARN for this cluster, if managed by this module or provided as input."
+  value       = local.oidc_provider_arn
+}
+
 output "cluster_security_group_id" {
   description = "Security group ID created by EKS for the cluster."
   value       = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
@@ -51,18 +56,6 @@ output "managed_node_groups" {
       arn    = node_group.arn
       id     = node_group.id
       status = node_group.status
-    }
-  }
-}
-
-output "cluster_addons" {
-  description = "EKS add-ons keyed by add-on name."
-  value = {
-    for name, addon in aws_eks_addon.this : name => {
-      addon_name    = addon.addon_name
-      addon_version = addon.addon_version
-      arn           = addon.arn
-      id            = addon.id
     }
   }
 }

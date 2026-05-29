@@ -1,14 +1,14 @@
 # AWS EKS Terraform Module
 
-Modulo reutilizable para crear clusters de Amazon EKS con Auto Mode o managed node groups clasicos. Puede crear roles IAM, crear subnets simples si se solicita, instalar add-ons administrados y configurar access entries.
+Modulo reutilizable para crear clusters de Amazon EKS con Auto Mode o managed node groups clasicos. Puede crear roles IAM, crear subnets simples si se solicita y configurar access entries.
 
 ## Que Crea
 
 - `aws_eks_cluster`
 - `aws_eks_node_group`, cuando `cluster_mode = "classic"`
-- `aws_eks_addon`, si se declaran add-ons
 - `aws_eks_access_entry` y `aws_eks_access_policy_association`, si se declaran access entries
 - roles IAM de cluster y nodos, si `create_*_iam_role = true`
+- IAM OIDC provider para IRSA, si `create_oidc_provider = true`
 - subnets simples, si `create_subnets = true`
 
 ## Ejemplo minimo con subnets existentes
@@ -87,25 +87,6 @@ module "eks" {
 }
 ```
 
-## Add-ons
-
-```hcl
-module "eks" {
-  source = "./modules/eks"
-
-  cluster_name = "platform-addons"
-  subnet_ids   = ["subnet-0123456789abcdef0", "subnet-0fedcba9876543210"]
-
-  cluster_addons = {
-    coredns    = {}
-    kube-proxy = {}
-    vpc-cni = {
-      resolve_conflicts_on_update = "OVERWRITE"
-    }
-  }
-}
-```
-
 ## Access entries
 
 ```hcl
@@ -152,12 +133,11 @@ module "eks" {
 
 - `cluster_name`, `cluster_arn`, `cluster_endpoint`
 - `cluster_certificate_authority_data`
-- `cluster_oidc_issuer_url`
+- `cluster_oidc_issuer_url`, `oidc_provider_arn`
 - `cluster_security_group_id`
 - `cluster_iam_role_arn`, `node_iam_role_arn`
 - `subnet_ids`
 - `managed_node_groups`
-- `cluster_addons`
 
 ## Inputs principales
 
@@ -168,7 +148,6 @@ module "eks" {
 - `kubernetes_version`: version concreta, o `null` para default de AWS.
 - `authentication_mode`: `API`, `CONFIG_MAP` o `API_AND_CONFIG_MAP`.
 - `managed_node_groups`: node groups configurables para modo classic.
-- `cluster_addons`: add-ons administrados por EKS.
 - `access_entries`: acceso IAM moderno al cluster.
 
 ## Notas
