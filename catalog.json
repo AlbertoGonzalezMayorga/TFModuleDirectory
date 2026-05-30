@@ -16,6 +16,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Composite/cloud_beaver",
+                                    "terraformVersion": ">= 1.9.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -216,6 +217,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Compute/ebs",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -306,6 +308,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Containers/ecr",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -389,6 +392,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Containers/eks",
+                                    "terraformVersion": ">= 1.9.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -791,6 +795,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Containers/eks-addons",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -854,6 +859,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Database/rds",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -1200,6 +1206,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Helm/helm-charts",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -1243,6 +1250,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/IAM/iam-roles",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -1290,6 +1298,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Secrets/secrets-manager",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -1333,6 +1342,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Networking/alb",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -1487,6 +1497,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Networking/cloudfront",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -1610,6 +1621,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Networking/nat_gtw",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -1644,6 +1656,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Networking/route53",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -1700,6 +1713,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Networking/vpc",
+                                    "terraformVersion": ">= 1.9.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -1808,6 +1822,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Storage/s3",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -1842,6 +1857,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "AWS/Storage/s3_policy",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -1900,6 +1916,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Compute/app_service",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -1950,6 +1967,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Containers/acr",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -1984,6 +2002,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Containers/aks",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -2018,6 +2037,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Containers/aks-addons",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -2051,6 +2071,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Containers/container_app",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -2068,9 +2089,9 @@
                                     "required": true
                                 },
                                 {
-                                    "name": "container_app_environment_id",
+                                    "name": "container_app_environment_name",
                                     "type": "string",
-                                    "description": "Container App Environment resource ID.",
+                                    "description": "Container App Environment resource Name.",
                                     "required": true
                                 },
                                 {
@@ -2237,6 +2258,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Database/postgresql_flexible_server",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -2276,6 +2298,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/IAM/role_assignment",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -2306,6 +2329,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/IAM/managed_identity",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -2357,6 +2381,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Helm/helm-charts",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -2400,6 +2425,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Monitoring/application_insights",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -2531,6 +2557,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Monitoring/log_analytics_workspace",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -2644,6 +2671,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Monitoring/monitor_workspace",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -2713,6 +2741,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Secrets/key_vault_secrets",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
                                 }
                             ],
@@ -2866,6 +2895,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Networking/application_gateway",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -2900,6 +2930,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Networking/dns_zone",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -2938,6 +2969,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Networking/front_door",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -2972,6 +3004,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Networking/nat_gateway",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -3006,6 +3039,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Networking/vnet",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],
@@ -3049,6 +3083,7 @@
                                 {
                                     "version": "v1.0.0",
                                     "sourcePath": "Azure/Storage/storage_account",
+                                    "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-22"
                                 }
                             ],

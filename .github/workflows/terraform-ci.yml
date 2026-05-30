@@ -1,0 +1,295 @@
+name: Terraform PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changed-modules:
+    name: detect-changed-modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      has_changes: ${{ steps.changed-modules.outputs.has_changes }}
+      matrix: ${{ steps.changed-modules.outputs.matrix }}
+      module_dirs: ${{ steps.changed-modules.outputs.module_dirs }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed Terraform modules
+        id: changed-modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE_SHA="HEAD~1"
+            HEAD_SHA="HEAD"
+          fi
+
+          mapfile -t changed_files < <(
+            git diff --name-only --diff-filter=ACMR "${BASE_SHA}" "${HEAD_SHA}" -- \
+              "*.tf" "*.tfvars" "*.tfvars.json" |
+            sort -u
+          )
+
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            echo "No changed Terraform files found."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo "module_dirs=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          module_dirs=()
+
+          for file in "${changed_files[@]}"; do
+            dir="$(dirname "${file}")"
+
+            if [ -d "${dir}" ] && find "${dir}" -maxdepth 1 -type f -name "*.tf" | grep -q .; then
+              module_dirs+=("${dir}")
+            fi
+          done
+
+          mapfile -t unique_module_dirs < <(printf "%s\n" "${module_dirs[@]}" | sort -u)
+
+          if [ "${#unique_module_dirs[@]}" -eq 0 ]; then
+            echo "No existing Terraform module directories found after filtering."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            echo "module_dirs=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          module_json_entries=()
+
+          for dir in "${unique_module_dirs[@]}"; do
+            if ! grep -hE 'required_version[[:space:]]*=' "${dir}"/*.tf >/dev/null 2>&1; then
+              echo "::error file=${dir}::Terraform module must declare terraform.required_version."
+              exit 1
+            fi
+
+            required_version="$(
+              grep -hE 'required_version[[:space:]]*=' "${dir}"/*.tf |
+              head -n 1 |
+              sed -E 's/.*"([^"]+)".*/\1/'
+            )"
+
+            if [ -z "${required_version}" ]; then
+              echo "::error file=${dir}::Unable to parse terraform.required_version."
+              exit 1
+            fi
+
+            module_json_entries+=("$(jq -cn --arg module_dir "${dir}" --arg terraform_version "${required_version}" '{module_dir: $module_dir, terraform_version: $terraform_version}')")
+          done
+
+          {
+            echo "has_changes=true"
+            echo "matrix=$(printf '%s\n' "${module_json_entries[@]}" | jq -sc '{include: .}')"
+            echo "module_dirs<<EOF"
+            printf "%s\n" "${unique_module_dirs[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate catalog Terraform version metadata
+        if: steps.changed-modules.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jq -r '
+            .cloudProviders[]
+            | .categories[]
+            | .modules[]
+            | .versions[]
+            | [.sourcePath, (.terraformVersion // "")]
+            | @tsv
+          ' catalog.json |
+          while IFS=$'\t' read -r source_path catalog_terraform_version; do
+            if [ ! -d "${source_path}" ]; then
+              echo "::error file=catalog.json::Catalog sourcePath does not exist: ${source_path}"
+              exit 1
+            fi
+
+            if [ -z "${catalog_terraform_version}" ]; then
+              echo "::error file=catalog.json::Catalog entry ${source_path} must declare terraformVersion."
+              exit 1
+            fi
+
+            module_terraform_version="$(
+              grep -hE 'required_version[[:space:]]*=' "${source_path}"/*.tf |
+              head -n 1 |
+              sed -E 's/.*"([^"]+)".*/\1/'
+            )"
+
+            if [ -z "${module_terraform_version}" ]; then
+              echo "::error file=${source_path}::Terraform module must declare terraform.required_version."
+              exit 1
+            fi
+
+            if [ "${catalog_terraform_version}" != "${module_terraform_version}" ]; then
+              echo "::error file=catalog.json::Catalog terraformVersion for ${source_path} (${catalog_terraform_version}) does not match module required_version (${module_terraform_version})."
+              exit 1
+            fi
+          done
+
+          jq -r '
+            .cloudProviders[]
+            | .categories[]
+            | .modules[]
+            | .versions[]
+            | .sourcePath
+          ' catalog.json | sort -u > catalog_paths.txt
+
+          jq -r '.include[].module_dir' <<< '${{ steps.changed-modules.outputs.matrix }}' |
+          while IFS= read -r dir; do
+            if ! grep -Fxq "${dir}" catalog_paths.txt; then
+              echo "::error file=catalog.json::Changed Terraform module is missing from catalog.json: ${dir}"
+              exit 1
+            fi
+          done
+
+  terraform-fmt:
+    name: terraform-fmt
+    needs: detect-changed-modules
+    if: needs.detect-changed-modules.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform format check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          while IFS= read -r dir; do
+            if [ -z "${dir}" ]; then
+              continue
+            fi
+
+            echo "::group::terraform fmt ${dir}"
+            terraform fmt -check -diff "${dir}"
+            echo "::endgroup::"
+          done <<< "${{ needs.detect-changed-modules.outputs.module_dirs }}"
+
+  terraform-lint:
+    name: terraform-lint
+    needs: detect-changed-modules
+    if: needs.detect-changed-modules.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v6.2.1
+
+      - name: TFLint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          while IFS= read -r dir; do
+            if [ -z "${dir}" ]; then
+              continue
+            fi
+
+            echo "::group::tflint ${dir}"
+            (
+              cd "${dir}"
+              tflint --init
+              tflint --minimum-failure-severity=warning
+            )
+            echo "::endgroup::"
+          done <<< "${{ needs.detect-changed-modules.outputs.module_dirs }}"
+
+  terraform-validate-modules:
+    name: terraform-validate-modules (${{ matrix.module_dir }})
+    needs: detect-changed-modules
+    if: needs.detect-changed-modules.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect-changed-modules.outputs.matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: ${{ matrix.terraform_version }}
+          terraform_wrapper: false
+
+      - name: Terraform init and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          terraform -chdir="${{ matrix.module_dir }}" init -backend=false -input=false
+          terraform -chdir="${{ matrix.module_dir }}" validate
+
+  terraform-validate:
+    name: terraform-validate
+    needs:
+      - detect-changed-modules
+      - terraform-validate-modules
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check validation result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ needs.detect-changed-modules.result }}" != "success" ]; then
+            echo "Module detection or catalog validation failed."
+            exit 1
+          fi
+
+          if [ "${{ needs.detect-changed-modules.outputs.has_changes }}" != "true" ]; then
+            echo "No changed Terraform modules to validate."
+            exit 0
+          fi
+
+          if [ "${{ needs.terraform-validate-modules.result }}" != "success" ]; then
+            echo "One or more Terraform module validations failed."
+            exit 1
+          fi
+
+          echo "All changed Terraform modules validated successfully."
