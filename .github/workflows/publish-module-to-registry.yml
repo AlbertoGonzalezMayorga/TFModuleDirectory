@@ -1,0 +1,210 @@
+name: Publish Module To Terraform Registry
+
+on:
+  workflow_call:
+    inputs:
+      module_path:
+        description: Terraform module directory to package.
+        required: true
+        type: string
+      module_name:
+        description: Terraform registry module name.
+        required: true
+        type: string
+      provider:
+        description: Terraform registry provider name.
+        required: true
+        type: string
+      version:
+        description: Terraform registry module version without the leading v.
+        required: true
+        type: string
+      commit_sha:
+        description: Commit SHA associated with the module version archive.
+        required: true
+        type: string
+    secrets:
+      TF_REGISTRY_TOKEN:
+        description: HCP Terraform token with permission to manage private registry modules.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish-module:
+    name: publish-module
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TF_REGISTRY_HOSTNAME: app.terraform.io
+      TF_REGISTRY_ORGANIZATION: CosmiLite
+      TF_REGISTRY_TOKEN: ${{ secrets.TF_REGISTRY_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Publish module version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          module_path="${{ inputs.module_path }}"
+          module_name="${{ inputs.module_name }}"
+          provider="${{ inputs.provider }}"
+          version="${{ inputs.version }}"
+          commit_sha="${{ inputs.commit_sha }}"
+
+          if [ ! -d "${module_path}" ]; then
+            echo "::error::Module path does not exist: ${module_path}"
+            exit 1
+          fi
+
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Registry version must use X.Y.Z format without a leading v. Found: ${version}"
+            exit 1
+          fi
+
+          api_base="https://${TF_REGISTRY_HOSTNAME}/api/v2"
+          module_endpoint="${api_base}/organizations/${TF_REGISTRY_ORGANIZATION}/registry-modules/private/${TF_REGISTRY_ORGANIZATION}/${module_name}/${provider}"
+          modules_endpoint="${api_base}/organizations/${TF_REGISTRY_ORGANIZATION}/registry-modules"
+          versions_endpoint="${module_endpoint}/versions"
+
+          response_file="$(mktemp)"
+          status="$(
+            curl -sS \
+              --header "Authorization: Bearer ${TF_REGISTRY_TOKEN}" \
+              --header "Content-Type: application/vnd.api+json" \
+              --request GET \
+              --output "${response_file}" \
+              --write-out "%{http_code}" \
+              "${module_endpoint}"
+          )"
+
+          if [ "${status}" = "404" ]; then
+            echo "Registry module ${module_name}/${provider} does not exist yet. Creating it."
+
+            create_module_payload="$(jq -cn \
+              --arg name "${module_name}" \
+              --arg provider "${provider}" \
+              '{
+                data: {
+                  type: "registry-modules",
+                  attributes: {
+                    name: $name,
+                    provider: $provider,
+                    "registry-name": "private",
+                    "no-code": false
+                  }
+                }
+              }')"
+
+            status="$(
+              curl -sS \
+                --header "Authorization: Bearer ${TF_REGISTRY_TOKEN}" \
+                --header "Content-Type: application/vnd.api+json" \
+                --request POST \
+                --data "${create_module_payload}" \
+                --output "${response_file}" \
+                --write-out "%{http_code}" \
+                "${modules_endpoint}"
+            )"
+
+            if [ "${status}" != "201" ]; then
+              echo "::error::Failed to create registry module ${module_name}/${provider}. HTTP ${status}"
+              cat "${response_file}"
+              exit 1
+            fi
+          elif [ "${status}" != "200" ]; then
+            echo "::error::Failed to inspect registry module ${module_name}/${provider}. HTTP ${status}"
+            cat "${response_file}"
+            exit 1
+          fi
+
+          version_status="$(
+            jq -r --arg version "${version}" '
+              .data.attributes["version-statuses"] // []
+              | map(select(.version == $version))
+              | last
+              | .status // ""
+            ' "${response_file}"
+          )"
+
+          if [ -n "${version_status}" ]; then
+            if [ "${version_status}" = "ok" ]; then
+              echo "Registry module version ${module_name}/${provider}/${version} already exists with ok status; skipping upload."
+              exit 0
+            fi
+
+            echo "::error::Registry module version ${module_name}/${provider}/${version} already exists with status ${version_status}."
+            exit 1
+          fi
+
+          create_version_payload="$(jq -cn \
+            --arg version "${version}" \
+            --arg commit_sha "${commit_sha}" \
+            '{
+              data: {
+                type: "registry-module-versions",
+                attributes: {
+                  version: $version,
+                  "commit-sha": $commit_sha
+                }
+              }
+            }')"
+
+          status="$(
+            curl -sS \
+              --header "Authorization: Bearer ${TF_REGISTRY_TOKEN}" \
+              --header "Content-Type: application/vnd.api+json" \
+              --request POST \
+              --data "${create_version_payload}" \
+              --output "${response_file}" \
+              --write-out "%{http_code}" \
+              "${versions_endpoint}"
+          )"
+
+          if [ "${status}" != "201" ]; then
+            echo "::error::Failed to create registry module version ${module_name}/${provider}/${version}. HTTP ${status}"
+            cat "${response_file}"
+            exit 1
+          fi
+
+          upload_url="$(jq -r '.data.links.upload // ""' "${response_file}")"
+
+          if [ -z "${upload_url}" ]; then
+            echo "::error::Registry did not return an upload URL for ${module_name}/${provider}/${version}."
+            cat "${response_file}"
+            exit 1
+          fi
+
+          archive="$(mktemp --suffix=.tar.gz)"
+          tar \
+            --exclude=".terraform" \
+            --exclude=".terraform.lock.hcl" \
+            -czf "${archive}" \
+            -C "${module_path}" \
+            .
+
+          status="$(
+            curl -sS \
+              --header "Authorization: Bearer ${TF_REGISTRY_TOKEN}" \
+              --header "Content-Type: application/octet-stream" \
+              --request PUT \
+              --data-binary "@${archive}" \
+              --output "${response_file}" \
+              --write-out "%{http_code}" \
+              "${upload_url}"
+          )"
+
+          if [ "${status}" != "200" ]; then
+            echo "::error::Failed to upload module archive for ${module_name}/${provider}/${version}. HTTP ${status}"
+            cat "${response_file}"
+            exit 1
+          fi
+
+          echo "Published app.terraform.io/${TF_REGISTRY_ORGANIZATION}/${module_name}/${provider} version ${version}."
