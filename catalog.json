@@ -2069,7 +2069,7 @@
                             "description": "Modulo para crear una Azure Container App con imagen, secrets, env vars, registry, ingress y dominios custom.",
                             "versions": [
                                 {
-                                    "version": "v1.0.0",
+                                    "version": "v1.0.1",
                                     "sourcePath": "Azure/Containers/container_app",
                                     "terraformVersion": ">= 1.5.0",
                                     "releaseDate": "2026-05-29"
