@@ -34,8 +34,10 @@ resource "azurerm_container_app" "this" {
     for_each = var.secrets
 
     content {
-      name  = secret.key
-      value = secret.value.value
+      name                = secret.key
+      value               = secret.value.value
+      key_vault_secret_id = secret.value.key_vault_secret_id
+      identity            = secret.value.identity
     }
   }
 

@@ -14,13 +14,13 @@ variable "container_app_name" {
 }
 
 variable "create_container_app_environment" {
-  description = "Whether to create a new Container App Environment. If false, an existing environment must be specified via existing_container_app_environment."
+  description = "Whether to create a new Container App Environment. If false, an existing environment must be specified via container_app_environment_name."
   type        = bool
   default     = true
 }
 
 variable "container_app_environment_name" {
-  description = "Container App Environment name. The name of an existing container_app_environment if create_container_app_environment is true, new environment name otherwise."
+  description = "Container App Environment name. The name of an existing container_app_environment if create_container_app_environment is false, new environment name otherwise."
   type        = string
   default     = null
 }
@@ -90,13 +90,32 @@ variable "env" {
 }
 
 variable "secrets" {
-  description = "Container App secrets, keyed by secret name."
+  description = "Container App secrets, keyed by secret name. Use either value for native Container App secrets or key_vault_secret_id plus identity for Key Vault references."
 
   type = map(object({
-    value = string
+    value               = optional(string)
+    key_vault_secret_id = optional(string)
+    identity            = optional(string)
   }))
 
   default = {}
+
+  validation {
+    condition = alltrue([
+      for secret in values(var.secrets) :
+      (
+        secret.value != null &&
+        secret.key_vault_secret_id == null &&
+        secret.identity == null
+      ) ||
+      (
+        secret.value == null &&
+        secret.key_vault_secret_id != null &&
+        secret.identity != null
+      )
+    ])
+    error_message = "Each secret must set either value, or both key_vault_secret_id and identity."
+  }
 }
 
 variable "registries" {

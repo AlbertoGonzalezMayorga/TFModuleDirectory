@@ -9,7 +9,7 @@ Modulo para crear una Azure Container App plug and play. Permite definir imagen,
 
 ## Ejemplo Minimo
 
-Si no se define `image`, se usa `mcr.microsoft.com/azuredocs/containerapps-helloworld:latest`.
+Si no se define `image`, se usa `mcr.microsoft.com/azuredocs/containerapps-helloworld:latest`. Por defecto, el modulo crea un Container App Environment con el nombre indicado en `container_app_environment_name`.
 
 ```hcl
 module "container_app" {
@@ -25,6 +25,35 @@ module "container_app" {
   }
 }
 ```
+
+## Gestion Del Container App Environment
+
+El modulo puede crear el Container App Environment o enlazar la app a uno existente.
+
+- `create_container_app_environment = true` es el valor por defecto. El modulo crea `azurerm_container_app_environment.this` usando `container_app_environment_name`, `resource_group_name`, `location` y `tags`.
+- `create_container_app_environment = false` no crea el environment. El modulo lee un environment existente por `container_app_environment_name` y `resource_group_name`.
+- `location` y `tags` solo afectan al environment cuando el modulo lo crea. La Container App siempre usa el environment efectivo, creado o existente.
+
+Ejemplo usando un environment existente:
+
+```hcl
+module "container_app" {
+  source = "./modules/Azure/Containers/container_app"
+
+  create_container_app_environment = false
+  container_app_environment_name   = "ca-shared-dev-env"
+  container_app_name               = "ca-api-dev"
+  resource_group_name              = "rg-platform-dev"
+  image                            = "nginx:latest"
+
+  ingress = {
+    external_enabled = true
+    target_port      = 80
+  }
+}
+```
+
+Cuando varias apps comparten el mismo environment, crea el environment una sola vez y configura el resto de apps con `create_container_app_environment = false`.
 
 ## Ejemplo Con Imagen, Secrets Y Env Vars
 
@@ -59,6 +88,40 @@ module "container_app" {
   }
 }
 ```
+
+## Ejemplo Con Secret De Key Vault
+
+Los secretos tambien pueden apuntar a Azure Key Vault. En ese caso, el secreto define `key_vault_secret_id` y la `identity` que Container Apps usara para leerlo. La identidad debe existir en la Container App mediante el bloque `identity` y debe tener permisos sobre el Key Vault mediante RBAC o access policy.
+
+```hcl
+module "container_app" {
+  source = "./modules/Azure/Containers/container_app"
+
+  container_app_name             = "ca-api-dev"
+  container_app_environment_name = "ca-api-dev-env"
+  resource_group_name            = "rg-platform-dev"
+  image                          = "nginx:latest"
+
+  identity = {
+    type = "SystemAssigned"
+  }
+
+  secrets = {
+    database-password = {
+      key_vault_secret_id = azurerm_key_vault_secret.database_password.id
+      identity            = "System"
+    }
+  }
+
+  env = {
+    DATABASE_PASSWORD = {
+      secret_name = "database-password"
+    }
+  }
+}
+```
+
+Para identidad user-assigned, incluye el resource ID en `identity.identity_ids` y usa ese mismo resource ID en `secrets[*].identity`.
 
 ## Ejemplo Con ACR
 
@@ -104,7 +167,7 @@ module "container_app" {
 
   custom_domains = {
     api = {
-      container_app_name                                     = "api.example.com"
+      container_app_name                       = "api.example.com"
       certificate_binding_type                 = "SniEnabled"
       container_app_environment_certificate_id = module.container_app_certificate.id
     }
@@ -134,16 +197,17 @@ module "container_apps" {
 ## Inputs Principales
 
 - `container_app_name`: nombre de la Container App.
-- `container_app_environment_name`: Name del Container App Environment.
+- `container_app_environment_name`: nombre del Container App Environment que se crea o se busca.
+- `create_container_app_environment`: si es `true`, crea un Container App Environment. Si es `false`, usa uno existente por nombre y resource group.
 - `resource_group_name`: resource group.
 - `image`: imagen del contenedor. Usa hello-world de Azure por defecto.
 - `container_name`, `cpu`, `memory`, `command`, `args`.
 - `env`: variables de entorno con `value` o `secret_name`.
-- `secrets`: secretos nativos de Container Apps.
+- `secrets`: secretos de Container Apps. Cada secreto puede usar `value` para un valor nativo o `key_vault_secret_id` + `identity` para referenciar Key Vault.
 - `registries`: registries privados con password secret o managed identity.
 - `ingress`: exposicion HTTP/TCP.
 - `custom_domains`: dominios custom.
-- `identity`: identidad administrada opcional.
+- `identity`: identidad administrada opcional para la Container App. Puede usarse para Key Vault secrets y ACR.
 - `min_replicas`, `max_replicas`.
 - `tags`.
 
@@ -159,4 +223,6 @@ module "container_apps" {
 
 ## Notas
 
-Los valores de `secrets` quedan almacenados en el state de Terraform. Usa un backend remoto cifrado y acceso restringido.
+Los secretos definidos con `value` quedan almacenados en el state de Terraform. Usa un backend remoto cifrado y acceso restringido.
+
+Los secretos definidos con `key_vault_secret_id` referencian Key Vault y evitan guardar el valor del secreto en el state de este modulo. Aun asi, debes conceder a la identidad de la Container App permiso para leer secretos en Key Vault antes de que la app pueda resolverlos.
