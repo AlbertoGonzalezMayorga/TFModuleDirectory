@@ -61,23 +61,28 @@ Every module that is meant to be consumed must be listed in the catalog with:
 - a stable module `id`
 - a human-readable `name`
 - a clear `description`
-- one or more `versions`
 - a `sourcePath` pointing to the module directory
+- a `registrySource` pointing to the private Terraform Registry source
+- a `latestVersion` for the currently released module version
 - a `terraformVersion` matching the module's Terraform `required_version`
-- input and output metadata
+- a `releaseDate`
+- current input and output metadata
 
 Example:
 
 ```json
 {
-  "version": "v1.0.0",
   "sourcePath": "AWS/Storage/s3",
+  "registrySource": "app.terraform.io/CosmiLite/s3/aws",
+  "latestVersion": "v1.0.0",
   "terraformVersion": ">= 1.5.0",
   "releaseDate": "2026-05-22"
 }
 ```
 
-The catalog is treated as part of the module contract. When a module is added, moved, renamed, or changes its Terraform compatibility, `catalog.json` must be updated in the same pull request.
+The catalog is a quick readability index for the repository's current state. Historical module versions live in the Terraform Registry and Git tags, not as duplicated module blocks in `catalog.json`.
+
+When a module changes, update the catalog entry in the same pull request: bump `latestVersion`, update `releaseDate`, and refresh inputs, outputs, descriptions, and compatibility metadata if they changed.
 
 ## Terraform Version Policy
 
@@ -116,6 +121,7 @@ For each changed module, CI checks:
 - the module exists in `catalog.json`
 - the catalog entry has `terraformVersion`
 - the catalog `terraformVersion` matches the module `required_version`
+- the catalog `latestVersion` was bumped compared to the pull request target branch
 - Terraform formatting passes
 - TFLint passes
 - `terraform init -backend=false` succeeds
@@ -124,6 +130,31 @@ For each changed module, CI checks:
 Terraform is installed per module using the version constraint declared by that module.
 
 This keeps pull request validation fast while still enforcing the repository contract.
+
+After a pull request is merged into `main`, `.github/workflows/tag-merged-modules.yml` creates an annotated tag for each changed module using:
+
+```text
+<cloud>-<module_name>-vX.Y.Z
+```
+
+Example:
+
+```text
+azure-container_app-v1.0.2
+```
+
+The tagging workflow then calls `.github/workflows/publish-module-to-registry.yml`, which packages the module directory and uploads the version to the private Terraform Registry at `app.terraform.io/CosmiLite`.
+
+Downstream stacks should consume released modules from the registry:
+
+```hcl
+module "storage" {
+  source  = "app.terraform.io/CosmiLite/s3/aws"
+  version = "1.0.0"
+}
+```
+
+The registry uses semantic versions without the leading `v`; Git tags and `catalog.json.latestVersion` keep the leading `v`.
 
 ## How To Contribute
 
@@ -160,7 +191,7 @@ Contributions should add a new module, improve an existing module, or update cat
 
 6. Add the module to `catalog.json`.
 
-   The catalog entry must include the module's `sourcePath` and matching `terraformVersion`.
+   The catalog entry must include the module's `sourcePath`, `registrySource`, `latestVersion`, and matching `terraformVersion`.
 
 7. Open a pull request.
 
@@ -174,7 +205,8 @@ When changing an existing module:
 2. Update the module README if behavior, inputs, outputs, or examples changed.
 3. Update `catalog.json` if inputs, outputs, description, source path, release metadata, or Terraform compatibility changed.
 4. Bump `terraformVersion` in `catalog.json` if `required_version` changes.
-5. Let CI validate the changed module.
+5. Bump `latestVersion` in `catalog.json` for every changed module.
+6. Let CI validate the changed module.
 
 ### Pull Request Expectations
 

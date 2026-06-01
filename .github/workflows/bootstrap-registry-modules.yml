@@ -1,0 +1,157 @@
+name: Bootstrap Terraform Registry Modules
+
+on:
+  workflow_dispatch:
+    inputs:
+      module_path:
+        description: Optional module path to publish. Leave empty to publish every catalog module.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bootstrap-registry-modules-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-modules:
+    name: prepare-modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      has_modules: ${{ steps.modules.outputs.has_modules }}
+      matrix: ${{ steps.modules.outputs.matrix }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Build module publish matrix
+        id: modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          requested_module_path="${{ inputs.module_path }}"
+
+          jq_filter='
+            .cloudProviders[] as $provider
+            | $provider.categories[]
+            | .modules[]
+            | select($requested_module_path == "" or .sourcePath == $requested_module_path)
+            | {
+                module_path: .sourcePath,
+                module_name: (.registryModuleName // (.sourcePath | split("/") | last)),
+                provider: ($provider.name | ascii_downcase),
+                catalog_version: .latestVersion,
+                version: (.latestVersion | sub("^v"; "")),
+                registry_source: .registrySource,
+                tag: (($provider.name | ascii_downcase) + "-" + (.sourcePath | split("/") | last) + "-" + .latestVersion)
+              }
+          '
+
+          mapfile -t module_entries < <(
+            jq -c --arg requested_module_path "${requested_module_path}" "${jq_filter}" catalog.json
+          )
+
+          if [ "${#module_entries[@]}" -eq 0 ]; then
+            if [ -n "${requested_module_path}" ]; then
+              echo "::error file=catalog.json::No catalog module matched module_path=${requested_module_path}"
+              exit 1
+            fi
+
+            echo "No catalog modules found."
+            echo "has_modules=false" >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for module_entry in "${module_entries[@]}"; do
+            module_path="$(jq -r '.module_path' <<< "${module_entry}")"
+            catalog_version="$(jq -r '.catalog_version' <<< "${module_entry}")"
+            registry_source="$(jq -r '.registry_source' <<< "${module_entry}")"
+
+            if [ ! -d "${module_path}" ]; then
+              echo "::error file=catalog.json::Catalog sourcePath does not exist: ${module_path}"
+              exit 1
+            fi
+
+            if [[ ! "${catalog_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error file=catalog.json::Catalog latestVersion for ${module_path} must use vX.Y.Z format. Found: ${catalog_version}"
+              exit 1
+            fi
+
+            if [ -z "${registry_source}" ] || [ "${registry_source}" = "null" ]; then
+              echo "::error file=catalog.json::Catalog entry for ${module_path} is missing registrySource."
+              exit 1
+            fi
+          done
+
+          {
+            echo "has_modules=true"
+            echo "matrix=$(printf '%s\n' "${module_entries[@]}" | jq -sc '{include: .}')"
+          } >> "$GITHUB_OUTPUT"
+
+  ensure-tags:
+    name: ensure-tags
+    needs: prepare-modules
+    if: needs.prepare-modules.outputs.has_modules == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-modules.outputs.matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Create tag if missing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${{ matrix.tag }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            existing_tag_sha="$(git rev-list -n 1 "${tag}")"
+
+            if [ "${existing_tag_sha}" != "${GITHUB_SHA}" ]; then
+              echo "::error::Tag ${tag} already exists at ${existing_tag_sha}, expected ${GITHUB_SHA}."
+              exit 1
+            fi
+
+            echo "Tag ${tag} already exists at ${GITHUB_SHA}."
+          else
+            echo "Creating bootstrap tag ${tag} at ${GITHUB_SHA}."
+            git tag -a "${tag}" "${GITHUB_SHA}" -m "Release ${tag}"
+            git push origin "${tag}"
+          fi
+
+  publish-modules:
+    name: publish-modules (${{ matrix.registry_source }})
+    needs:
+      - prepare-modules
+      - ensure-tags
+    if: needs.prepare-modules.outputs.has_modules == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-modules.outputs.matrix) }}
+    uses: ./.github/workflows/publish-module-to-registry.yml
+    with:
+      module_path: ${{ matrix.module_path }}
+      module_name: ${{ matrix.module_name }}
+      provider: ${{ matrix.provider }}
+      version: ${{ matrix.version }}
+      commit_sha: ${{ github.sha }}
+    secrets:
+      TF_REGISTRY_TOKEN: ${{ secrets.TF_REGISTRY_TOKEN }}

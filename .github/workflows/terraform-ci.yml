@@ -44,12 +44,12 @@ jobs:
 
           mapfile -t changed_files < <(
             git diff --name-only --diff-filter=ACMR "${BASE_SHA}" "${HEAD_SHA}" -- \
-              "*.tf" "*.tfvars" "*.tfvars.json" |
+              "*.tf" "*.tfvars" "*.tfvars.json" "*/README.md" |
             sort -u
           )
 
           if [ "${#changed_files[@]}" -eq 0 ]; then
-            echo "No changed Terraform files found."
+            echo "No changed module-relevant files found."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
             echo "module_dirs=" >> "$GITHUB_OUTPUT"
@@ -116,7 +116,6 @@ jobs:
             .cloudProviders[]
             | .categories[]
             | .modules[]
-            | .versions[]
             | [.sourcePath, (.terraformVersion // "")]
             | @tsv
           ' catalog.json |
@@ -152,7 +151,6 @@ jobs:
             .cloudProviders[]
             | .categories[]
             | .modules[]
-            | .versions[]
             | .sourcePath
           ' catalog.json | sort -u > catalog_paths.txt
 
@@ -163,6 +161,116 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Validate changed modules have catalog version bumps
+        if: steps.changed-modules.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_SHA="HEAD~1"
+          fi
+
+          base_catalog="$(mktemp)"
+
+          if ! git show "${BASE_SHA}:catalog.json" > "${base_catalog}" 2>/dev/null; then
+            echo "::warning file=catalog.json::Unable to read catalog.json from ${BASE_SHA}; skipping version bump comparison."
+            exit 0
+          fi
+
+          get_catalog_version() {
+            local catalog_file="$1"
+            local source_path="$2"
+
+            jq -r --arg source_path "${source_path}" '
+              [
+                .cloudProviders[]
+                | .categories[]
+                | .modules[]
+                | select(.sourcePath == $source_path)
+                | .latestVersion
+              ]
+              | last // ""
+            ' "${catalog_file}"
+          }
+
+          parse_version() {
+            local version="$1"
+
+            if [[ ! "${version}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              return 1
+            fi
+
+            printf "%s %s %s\n" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+          }
+
+          version_is_greater() {
+            local current="$1"
+            local base="$2"
+            local current_major current_minor current_patch
+            local base_major base_minor base_patch
+
+            read -r current_major current_minor current_patch < <(parse_version "${current}")
+            read -r base_major base_minor base_patch < <(parse_version "${base}")
+
+            if (( current_major > base_major )); then
+              return 0
+            fi
+
+            if (( current_major == base_major && current_minor > base_minor )); then
+              return 0
+            fi
+
+            if (( current_major == base_major && current_minor == base_minor && current_patch > base_patch )); then
+              return 0
+            fi
+
+            return 1
+          }
+
+          while IFS= read -r dir; do
+            if [ -z "${dir}" ]; then
+              continue
+            fi
+
+            current_version="$(get_catalog_version "catalog.json" "${dir}")"
+            base_version="$(get_catalog_version "${base_catalog}" "${dir}")"
+
+            if [ -z "${current_version}" ]; then
+              echo "::error file=catalog.json::Changed module is missing a catalog version: ${dir}"
+              exit 1
+            fi
+
+            if ! parse_version "${current_version}" >/dev/null; then
+              echo "::error file=catalog.json::Catalog version for ${dir} must use vX.Y.Z format. Found: ${current_version}"
+              exit 1
+            fi
+
+            if [ -z "${base_version}" ]; then
+              echo "New catalog entry for ${dir} uses version ${current_version}."
+              continue
+            fi
+
+            if ! parse_version "${base_version}" >/dev/null; then
+              echo "::error file=catalog.json::Base catalog version for ${dir} must use vX.Y.Z format. Found: ${base_version}"
+              exit 1
+            fi
+
+            if [ "${current_version}" = "${base_version}" ]; then
+              echo "::error file=catalog.json::Changed module ${dir} must bump catalog version. Current version is still ${current_version}."
+              exit 1
+            fi
+
+            if ! version_is_greater "${current_version}" "${base_version}"; then
+              echo "::error file=catalog.json::Catalog version for ${dir} must increase from ${base_version}. Found: ${current_version}"
+              exit 1
+            fi
+
+            echo "Catalog version bump detected for ${dir}: ${base_version} -> ${current_version}"
+          done <<< "${{ steps.changed-modules.outputs.module_dirs }}"
 
   terraform-fmt:
     name: terraform-fmt

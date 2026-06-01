@@ -1,0 +1,177 @@
+name: Tag Merged Modules
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tag-modules-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tag-modules:
+    name: tag-modules
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      has_tags: ${{ steps.tagged-modules.outputs.has_tags }}
+      matrix: ${{ steps.tagged-modules.outputs.matrix }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed modules and create tags
+        id: tagged-modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+            BASE_SHA="${MERGE_SHA}^1"
+          else
+            MERGE_SHA="HEAD"
+            BASE_SHA="HEAD~1"
+          fi
+
+          mapfile -t changed_files < <(
+            git diff --name-only --diff-filter=ACMR "${BASE_SHA}" "${MERGE_SHA}" -- \
+              "*.tf" "*/README.md" "catalog.json" |
+            sort -u
+          )
+
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            echo "No module-relevant changed files found."
+            echo "has_tags=false" >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          module_dirs=()
+
+          for file in "${changed_files[@]}"; do
+            if [ "${file}" = "catalog.json" ]; then
+              continue
+            fi
+
+            dir="$(dirname "${file}")"
+
+            if [ -d "${dir}" ] && find "${dir}" -maxdepth 1 -type f -name "*.tf" | grep -q .; then
+              module_dirs+=("${dir}")
+            fi
+          done
+
+          mapfile -t unique_module_dirs < <(printf "%s\n" "${module_dirs[@]}" | sort -u)
+
+          if [ "${#unique_module_dirs[@]}" -eq 0 ]; then
+            echo "No changed Terraform module directories found."
+            echo "has_tags=false" >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          tagged_module_entries=()
+
+          for dir in "${unique_module_dirs[@]}"; do
+            module_metadata="$(
+              jq -c --arg source_path "${dir}" '
+                .cloudProviders[] as $provider
+                | $provider.categories[]
+                | .modules[]
+                | select(.sourcePath == $source_path)
+                | {
+                    provider: $provider.name,
+                    sourcePath: $source_path,
+                    moduleName: (.registryModuleName // (.sourcePath | split("/") | last)),
+                    version: .latestVersion,
+                    registrySource: .registrySource
+                  }
+              ' catalog.json
+            )"
+
+            if [ -z "${module_metadata}" ]; then
+              echo "::error file=catalog.json::Changed module is missing from catalog.json: ${dir}"
+              exit 1
+            fi
+
+            provider="$(jq -r '.provider' <<< "${module_metadata}" | tr '[:upper:]' '[:lower:]')"
+            registry_module_name="$(jq -r '.moduleName' <<< "${module_metadata}")"
+            registry_source="$(jq -r '.registrySource' <<< "${module_metadata}")"
+            version="$(jq -r '.version' <<< "${module_metadata}")"
+            module_name="$(basename "${dir}")"
+            tag="${provider}-${module_name}-${version}"
+
+            if [ -z "${version}" ] || [ "${version}" = "null" ]; then
+              echo "::error file=catalog.json::Catalog entry for ${dir} is missing latestVersion."
+              exit 1
+            fi
+
+            if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error file=catalog.json::Catalog latestVersion for ${dir} must use vX.Y.Z format. Found: ${version}"
+              exit 1
+            fi
+
+            if [ -z "${registry_source}" ] || [ "${registry_source}" = "null" ]; then
+              echo "::error file=catalog.json::Catalog entry for ${dir} is missing registrySource."
+              exit 1
+            fi
+
+            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              existing_tag_sha="$(git rev-list -n 1 "${tag}")"
+
+              if [ "${existing_tag_sha}" != "${MERGE_SHA}" ]; then
+                echo "::error::Tag ${tag} already exists at ${existing_tag_sha}, expected ${MERGE_SHA}. Bump latestVersion in catalog.json before merging a new release."
+                exit 1
+              fi
+
+              echo "Tag ${tag} already exists at ${MERGE_SHA}; continuing."
+            else
+              echo "Creating tag ${tag} at ${MERGE_SHA} for ${dir}."
+              git tag -a "${tag}" "${MERGE_SHA}" -m "Release ${tag}"
+              git push origin "${tag}"
+            fi
+
+            registry_version="${version#v}"
+            tagged_module_entries+=("$(jq -cn \
+              --arg module_path "${dir}" \
+              --arg module_name "${registry_module_name}" \
+              --arg provider "${provider}" \
+              --arg version "${registry_version}" \
+              --arg tag "${tag}" \
+              --arg registry_source "${registry_source}" \
+              '{module_path: $module_path, module_name: $module_name, provider: $provider, version: $version, tag: $tag, registry_source: $registry_source}')")
+          done
+
+          {
+            echo "has_tags=true"
+            echo "matrix=$(printf '%s\n' "${tagged_module_entries[@]}" | jq -sc '{include: .}')"
+          } >> "$GITHUB_OUTPUT"
+
+  publish-tagged-modules:
+    name: publish-tagged-modules (${{ matrix.registry_source }})
+    needs: tag-modules
+    if: needs.tag-modules.outputs.has_tags == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.tag-modules.outputs.matrix) }}
+    uses: ./.github/workflows/publish-module-to-registry.yml
+    with:
+      module_path: ${{ matrix.module_path }}
+      module_name: ${{ matrix.module_name }}
+      provider: ${{ matrix.provider }}
+      version: ${{ matrix.version }}
+      commit_sha: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+    secrets:
+      TF_REGISTRY_TOKEN: ${{ secrets.TF_REGISTRY_TOKEN }}
