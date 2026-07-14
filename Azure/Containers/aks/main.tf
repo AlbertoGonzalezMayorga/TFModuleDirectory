@@ -20,6 +20,7 @@ resource "azurerm_kubernetes_cluster" "this" {
     max_count            = each.value.default_node_pool.max_count
     vnet_subnet_id       = each.value.default_node_pool.vnet_subnet_id
     zones                = each.value.default_node_pool.zones
+    tags = merge(var.tags, each.value.tags)
   }
 
   identity {

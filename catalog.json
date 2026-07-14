@@ -1968,7 +1968,7 @@
               ],
               "sourcePath": "Azure/Containers/aks",
               "registrySource": "app.terraform.io/CosmiLite/aks/azure",
-              "latestVersion": "v1.0.0",
+              "latestVersion": "v1.0.1",
               "terraformVersion": ">= 1.5.0",
               "releaseDate": "2026-05-22"
             },
